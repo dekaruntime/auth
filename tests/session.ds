@@ -1,0 +1,219 @@
+import { auth, requireUser, requireRole, signIn, signOut } from "../index.ds"
+
+fn echo(message: string) {
+  match (unsafe { console.log(message) }) {
+    Ok(v) => v,
+    Err(e) => e
+  }
+}
+
+fn utf8(value: string): bytes {
+  let encoded = unsafe { new TextEncoder().encode(value) };
+  return match (encoded) {
+    Ok(buf) => buf,
+    Err(err) => utf8("")
+  };
+}
+
+fn req(cookie: string) {
+  return { headers: { cookie: cookie } }
+}
+
+interface Bag {
+  sub: string
+}
+
+fn fail(msg: string) {
+  echo(msg)
+}
+
+fn sub_of(session: Bag) string {
+  let r = unsafe { String(session.sub || "") };
+  return match (r) {
+    Ok(v) => v,
+    Err(e) => ""
+  };
+}
+
+fn go() {
+  let secret = utf8("test-secret");
+  let other = utf8("other-secret");
+
+  const alice = match (signIn({ sub: "alice", roles: ["user"] }, secret, {})) {
+    Ok(out) => out,
+    Err(e) => { cookie: "", value: "", header: "fail-signin" }
+  };
+  if (alice.header == "fail-signin" || alice.value == "") {
+    fail("fail-signin");
+    return;
+  }
+  if (alice.cookie != "deka_sid") {
+    fail("fail-cookie-name");
+    return;
+  }
+
+  const has_http_only: boolean = match (unsafe { alice.header.indexOf("HttpOnly") >= 0 }) {
+    Ok(v) => v,
+    Err(e) => false
+  };
+  if (!has_http_only) {
+    fail("fail-httponly");
+    return;
+  }
+
+  const cookie = alice.cookie + "=" + alice.value;
+  const authed = match (auth(req(cookie), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (authed != "alice") {
+    fail("fail-auth");
+    echo(authed);
+    return;
+  }
+
+  const missing = match (auth(req(""), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (missing != "none") {
+    fail("fail-missing");
+    return;
+  }
+
+  const ga = match (auth(req("_ga=1; " + cookie + "; theme=dark"), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (ga != "alice") {
+    fail("fail-other-cookies");
+    return;
+  }
+
+  const wrong = match (auth(req(cookie), other)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (wrong != "none") {
+    fail("fail-wrong-secret");
+    return;
+  }
+
+  const no_user = match (requireUser(req(""), secret)) {
+    Ok(session) => "ok",
+    Err(e) => e,
+    _ => "unknown"
+  };
+  if (no_user != "unauthenticated") {
+    fail("fail-require-user");
+    echo(no_user);
+    return;
+  }
+
+  const as_user = match (requireRole(req(cookie), secret, "admin")) {
+    Ok(session) => "ok",
+    Err(e) => e,
+    _ => "unknown"
+  };
+  if (as_user != "unauthorized") {
+    fail("fail-unauthorized");
+    echo(as_user);
+    return;
+  }
+
+  const admin = match (signIn({ sub: "bob", roles: ["admin", "user"] }, secret, {})) {
+    Ok(out) => out,
+    Err(e) => { cookie: "", value: "", header: "" }
+  };
+  const admin_cookie = admin.cookie + "=" + admin.value;
+  const as_admin = match (requireRole(req(admin_cookie), secret, "admin")) {
+    Ok(session) => sub_of(session),
+    Err(e) => e,
+    _ => "unknown"
+  };
+  if (as_admin != "bob") {
+    fail("fail-admin");
+    echo(as_admin);
+    return;
+  }
+
+  const expired = match (signIn({ sub: "old" }, secret, { maxAge: -10 })) {
+    Ok(out) => out,
+    Err(e) => { cookie: "", value: "", header: "" }
+  };
+  const expired_cookie = expired.cookie + "=" + expired.value;
+  const expired_auth = match (auth(req(expired_cookie), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (expired_auth != "none") {
+    fail("fail-expired");
+    return;
+  }
+
+  const tail = match (unsafe {
+    var v = String(alice.value);
+    return v.slice(0, -1) + (v.slice(-1) === "A" ? "B" : "A");
+  }) {
+    Ok(v) => v,
+    Err(e) => ""
+  };
+  const tampered = match (auth(req("deka_sid=" + tail), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (tampered != "none") {
+    fail("fail-tamper");
+    return;
+  }
+
+  const custom = match (signIn({ sub: "carol" }, secret, { cookie: "sid" })) {
+    Ok(out) => out,
+    Err(e) => { cookie: "", value: "", header: "" }
+  };
+  const custom_ok = match (auth(req("sid=" + custom.value), secret, { cookie: "sid" })) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  const custom_default = match (auth(req("sid=" + custom.value), secret)) {
+    None => "none",
+    Some(session) => sub_of(session),
+    _ => "unknown"
+  };
+  if (custom_ok != "carol" || custom_default != "none") {
+    fail("fail-custom-cookie");
+    return;
+  }
+
+  const out = signOut({});
+  const clears: boolean = match (unsafe { out.header.indexOf("Max-Age=0") >= 0 }) {
+    Ok(v) => v,
+    Err(e) => false
+  };
+  if (!clears || out.cookie != "deka_sid") {
+    fail("fail-signout");
+    return;
+  }
+
+  const missing_sub = match (signIn({ sub: "" }, secret, {})) {
+    Ok(v) => "ok",
+    Err(e) => e,
+    _ => "unknown"
+  };
+  if (missing_sub != "invalid session") {
+    fail("fail-missing-sub");
+    echo(missing_sub);
+    return;
+  }
+
+  echo("ok");
+}
+
+go()
