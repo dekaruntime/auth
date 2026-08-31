@@ -30,7 +30,8 @@ export fn admin(request) {
 `requireRole` is `Err("unauthorized")` when a session exists but the role does not.
 
 `secret` is bytes, same as `@deka/jwt`. The cookie is AES-GCM (key = SHA-256 of
-the secret); claims are not readable from the cookie value.
+the secret); claims are not readable from the cookie value. Parse and
+Set-Cookie come from `@deka/cookies`.
 
 v1 is the sealed session cookie. Password verify, OAuth, and PKCE are not in
 this package yet.

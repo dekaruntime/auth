@@ -1,6 +1,7 @@
 // Sealed session cookie for deka serve. Call inside the handler with the request.
 // Default cookie name is deka_sid (same name island AAD binds). No locals.
 import { random_bytes, sha256, aes_256_gcm_encrypt, aes_256_gcm_decrypt } from "crypto"
+import { value as cookie_value, build_set_cookie, clear_cookie } from "cookies"
 
 interface AuthOptions {
   cookie: string?
@@ -124,45 +125,21 @@ fn cookie_header(request: AuthRequest): string {
   };
 }
 
-fn cookie_value(header: string, name: string): string {
-  let r = unsafe {
-    var want = String(name || "");
-    if (!want) return "";
-    var parts = String(header || "").split(";");
-    var i = 0;
-    for (i = 0; i < parts.length; i++) {
-      var part = parts[i].trim();
-      var eq = part.indexOf("=");
-      if (eq <= 0) continue;
-      if (part.slice(0, eq) !== want) continue;
-      var raw = part.slice(eq + 1).trim();
-      try {
-        return decodeURIComponent(raw);
-      } catch (err) {
-        return raw;
-      }
-    }
-    return "";
-  };
-  return match (r) {
-    Ok(v) => v,
-    Err(e) => ""
+fn cookie_attrs(options: AuthOptions, empty: boolean) {
+  return unsafe {
+    var maxAge = options && options.maxAge != null ? Number(options.maxAge) : 604800;
+    if (empty) maxAge = 0;
+    var attrs = { path: "/", max_age: maxAge, http_only: true, same_site: "Lax" };
+    if (options && options.secure != null) attrs.secure = Boolean(options.secure);
+    return attrs;
   };
 }
 
-fn set_cookie(name: string, value: string, options: AuthOptions): string {
-  let r = unsafe {
-    var maxAge = options && options.maxAge != null ? Number(options.maxAge) : 604800;
-    if (value === "") maxAge = 0;
-    var encoded = encodeURIComponent(value);
-    var header = String(name) + "=" + encoded + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + String(maxAge);
-    if (options && options.secure) header += "; Secure";
-    return header;
-  };
-  return match (r) {
-    Ok(v) => v,
-    Err(e) => name + "="
-  };
+fn set_cookie(name: string, cookie_value: string, options: AuthOptions): string {
+  return match (cookie_attrs(options, cookie_value == "")) {
+    Err(e) => name + "=",
+    Ok(attrs) => build_set_cookie(name, cookie_value, attrs)
+  }
 }
 
 fn session_json(user: SessionUser, options: AuthOptions): string {
@@ -260,7 +237,10 @@ export fn signIn(user: SessionUser, secret: bytes, options: AuthOptions = {}) {
 
 export fn signOut(options: AuthOptions = {}) {
   const name = opt_cookie(options);
-  return { cookie: name, value: "", header: set_cookie(name, "", options) }
+  return match (cookie_attrs(options, true)) {
+    Err(e) => { cookie: name, value: "", header: name + "=" },
+    Ok(attrs) => { cookie: name, value: "", header: clear_cookie(name, attrs) }
+  }
 }
 
 export fn auth(request: AuthRequest, secret: bytes, options: AuthOptions = {}) {

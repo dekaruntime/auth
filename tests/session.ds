@@ -158,7 +158,8 @@ fn go() {
 
   const tail = match (unsafe {
     var v = String(alice.value);
-    return v.slice(0, -1) + (v.slice(-1) === "A" ? "B" : "A");
+    var i = 4;
+    return v.slice(0, i) + (v.charAt(i) === "A" ? "B" : "A") + v.slice(i + 1);
   }) {
     Ok(v) => v,
     Err(e) => ""
@@ -170,6 +171,7 @@ fn go() {
   };
   if (tampered != "none") {
     fail("fail-tamper");
+    echo(tampered);
     return;
   }
 
