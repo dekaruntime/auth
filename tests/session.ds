@@ -1,12 +1,6 @@
-import { auth, requireUser, requireRole, signIn, signOut } from "../index.ds"
+import { echo } from "io"
 import { from_string } from "bytes"
-
-fn echo(message: string) {
-  match (unsafe { console.log(message) }) {
-    Ok(v) => v,
-    Err(e) => e
-  }
-}
+import { auth, requireUser, requireRole, signIn, signOut } from "../index.ds"
 
 fn req(cookie: string) {
   return { headers: { cookie: cookie } }
