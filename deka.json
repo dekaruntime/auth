@@ -4,6 +4,7 @@
   "main": "index.ds",
   "dependencies": {
     "@deka/crypto": "0.2.0",
+    "@deka/bytes": "0.2.0",
     "@deka/cookies": "0.2.0"
   }
 }

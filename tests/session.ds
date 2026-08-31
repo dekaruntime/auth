@@ -1,18 +1,11 @@
 import { auth, requireUser, requireRole, signIn, signOut } from "../index.ds"
+import { from_string } from "bytes"
 
 fn echo(message: string) {
   match (unsafe { console.log(message) }) {
     Ok(v) => v,
     Err(e) => e
   }
-}
-
-fn utf8(value: string): bytes {
-  let encoded = unsafe { new TextEncoder().encode(value) };
-  return match (encoded) {
-    Ok(buf) => buf,
-    Err(err) => utf8("")
-  };
 }
 
 fn req(cookie: string) {
@@ -36,8 +29,8 @@ fn sub_of(session: Bag) string {
 }
 
 fn go() {
-  let secret = utf8("test-secret");
-  let other = utf8("other-secret");
+  let secret = from_string("0123456789abcdef0123456789abcdef");
+  let other = from_string("abcdef0123456789abcdef0123456789");
 
   const alice = match (signIn({ sub: "alice", roles: ["user"] }, secret, {})) {
     Ok(out) => out,
@@ -212,6 +205,17 @@ fn go() {
   if (missing_sub != "invalid session") {
     fail("fail-missing-sub");
     echo(missing_sub);
+    return;
+  }
+
+  const short = match (signIn({ sub: "x" }, from_string("too-short"), {})) {
+    Ok(v) => "ok",
+    Err(e) => e,
+    _ => "unknown"
+  };
+  if (short != "secret must be at least 32 bytes") {
+    fail("fail-short-secret");
+    echo(short);
     return;
   }
 

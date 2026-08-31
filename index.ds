@@ -1,6 +1,7 @@
 // Sealed session cookie for deka serve. Call inside the handler with the request.
 // Default cookie name is deka_sid (same name island AAD binds). No locals.
-import { random_bytes, sha256, aes_256_gcm_encrypt, aes_256_gcm_decrypt } from "crypto"
+import { random_bytes, hmac, aes_256_gcm_encrypt, aes_256_gcm_decrypt } from "crypto"
+import { from_string, to_string, concat, to_base64, from_base64, len } from "bytes"
 import { value as cookie_value, build_set_cookie, clear_cookie } from "cookies"
 
 interface AuthOptions {
@@ -22,87 +23,29 @@ interface SessionUser {
   roles: Array<string>?
 }
 
-fn utf8(value: string): bytes {
-  let encoded = unsafe { new TextEncoder().encode(value) };
-  return match (encoded) {
-    Ok(buf) => buf,
-    Err(err) => utf8("")
-  };
-}
-
-fn from_utf8(value: bytes): string {
-  let decoded = unsafe { new TextDecoder("utf-8", { fatal: false }).decode(value) };
-  return match (decoded) {
-    Ok(text) => text,
-    Err(err) => ""
-  };
-}
-
 fn b64url_encode(data: bytes): string {
-  let r = unsafe {
-    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    var s = "";
-    var i = 0;
-    var n = data.byteLength;
-    for (i = 0; i < n; i += 3) {
-      var b0 = data[i];
-      var b1 = i + 1 < n ? data[i + 1] : 0;
-      var b2 = i + 2 < n ? data[i + 2] : 0;
-      var triple = (b0 << 16) + (b1 << 8) + b2;
-      s += alphabet[(triple >> 18) & 63];
-      s += alphabet[(triple >> 12) & 63];
-      s += i + 1 < n ? alphabet[(triple >> 6) & 63] : "=";
-      s += i + 2 < n ? alphabet[triple & 63] : "=";
-    }
-    return s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  };
-  return match (r) {
-    Ok(v) => v,
-    Err(e) => ""
-  };
+  const raw = to_base64(data)
+  return raw.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
 }
 
 fn b64url_decode(value: string): bytes {
-  let r = unsafe {
-    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    var s = String(value).replace(/-/g, "+").replace(/_/g, "/");
-    while (s.length % 4 !== 0) s += "=";
-    var clean = s.replace(/=+$/, "");
-    var n = clean.length;
-    var out = [];
-    var i = 0;
-    for (i = 0; i < n; i += 4) {
-      var c0 = alphabet.indexOf(clean[i]);
-      var c1 = alphabet.indexOf(clean[i + 1]);
-      var c2 = i + 2 < n ? alphabet.indexOf(clean[i + 2]) : 0;
-      var c3 = i + 3 < n ? alphabet.indexOf(clean[i + 3]) : 0;
-      var triple = (c0 << 18) + (c1 << 12) + (c2 << 6) + c3;
-      out.push((triple >> 16) & 255);
-      if (i + 2 < n) out.push((triple >> 8) & 255);
-      if (i + 3 < n) out.push(triple & 255);
-    }
-    return new Uint8Array(out);
-  };
-  return match (r) {
-    Ok(buf) => buf,
-    Err(err) => utf8("")
-  };
-}
-
-fn concat(a: bytes, b: bytes) {
-  return unsafe {
-    var out = new Uint8Array(a.byteLength + b.byteLength);
-    out.set(a, 0);
-    out.set(b, a.byteLength);
-    return out;
-  };
+  return from_base64(value.replaceAll("-", "+").replaceAll("_", "/"))
 }
 
 fn split_sealed(raw: bytes) {
+  if (len(raw) < 28) {
+    return Err("unauthenticated")
+  }
   return unsafe {
-    if (!raw || raw.byteLength < 28) throw new Error("short");
     return { nonce: raw.subarray(0, 12), ciphertext: raw.subarray(12) };
   };
+}
+
+fn session_key(secret: bytes) {
+  if (len(secret) < 32) {
+    return Err("secret must be at least 32 bytes")
+  }
+  return hmac("sha256", from_string("deka.auth.session.v1"), secret)
 }
 
 fn opt_cookie(options: AuthOptions): string {
@@ -135,9 +78,9 @@ fn cookie_attrs(options: AuthOptions, empty: boolean) {
   };
 }
 
-fn set_cookie(name: string, cookie_value: string, options: AuthOptions): string {
+fn set_cookie(name: string, cookie_value: string, options: AuthOptions) {
   return match (cookie_attrs(options, cookie_value == "")) {
-    Err(e) => name + "=",
+    Err(e) => Err(e),
     Ok(attrs) => build_set_cookie(name, cookie_value, attrs)
   }
 }
@@ -160,7 +103,7 @@ fn session_json(user: SessionUser, options: AuthOptions): string {
 }
 
 fn parse_session(pt: bytes) {
-  const json = from_utf8(pt);
+  const json = to_string(pt);
   return unsafe {
     var session = JSON.parse(json);
     var now = Math.floor(Date.now() / 1000);
@@ -190,7 +133,10 @@ fn allow_role(session: SessionUser, role: string) {
 }
 
 fn cookie_ok(name: string, value: string, options: AuthOptions) {
-  return Ok({ cookie: name, value: value, header: set_cookie(name, value, options) })
+  return match (set_cookie(name, value, options)) {
+    Err(e) => Err(e),
+    Ok(header) => Ok({ cookie: name, value: value, header: header })
+  }
 }
 
 fn read_session(request: AuthRequest, secret: bytes, options: AuthOptions) {
@@ -199,11 +145,11 @@ fn read_session(request: AuthRequest, secret: bytes, options: AuthOptions) {
   if (value == "") {
     return Err("unauthenticated")
   }
-  return match (sha256(secret)) {
+  return match (session_key(secret)) {
     Err(e) => Err(e),
     Ok(key) => match (split_sealed(b64url_decode(value))) {
       Err(e) => Err("unauthenticated"),
-      Ok(parts) => match (aes_256_gcm_decrypt(key, parts.nonce, parts.ciphertext, utf8(name))) {
+      Ok(parts) => match (aes_256_gcm_decrypt(key, parts.nonce, parts.ciphertext, from_string(name))) {
         Err(e) => Err("unauthenticated"),
         Ok(pt) => match (parse_session(pt)) {
           Err(e) => Err("unauthenticated"),
@@ -220,30 +166,39 @@ export fn signIn(user: SessionUser, secret: bytes, options: AuthOptions = {}) {
   if (json == "") {
     return Err("invalid session")
   }
-  return match (sha256(secret)) {
+  return match (session_key(secret)) {
     Err(e) => Err(e),
     Ok(key) => match (random_bytes(12)) {
       Err(e) => Err(e),
-      Ok(nonce) => match (aes_256_gcm_encrypt(key, nonce, utf8(json), utf8(name))) {
+      Ok(nonce) => match (aes_256_gcm_encrypt(key, nonce, from_string(json), from_string(name))) {
         Err(e) => Err(e),
-        Ok(ct) => match (concat(nonce, ct)) {
-          Err(e) => Err("seal failed"),
-          Ok(blob) => cookie_ok(name, b64url_encode(blob), options)
-        }
+        Ok(ct) => cookie_ok(name, b64url_encode(concat(nonce, ct)), options)
       }
     }
   }
 }
 
+fn empty_out(name: string) {
+  return { cookie: name, value: "", header: "" }
+}
+
 export fn signOut(options: AuthOptions = {}) {
   const name = opt_cookie(options);
   return match (cookie_attrs(options, true)) {
-    Err(e) => { cookie: name, value: "", header: name + "=" },
-    Ok(attrs) => { cookie: name, value: "", header: clear_cookie(name, attrs) }
+    Err(e) => empty_out(name),
+    Ok(attrs) => match (clear_cookie(name, attrs)) {
+      Err(e) => empty_out(name),
+      Ok(header) => { cookie: name, value: "", header: header },
+      _ => empty_out(name)
+    }
   }
 }
 
 export fn auth(request: AuthRequest, secret: bytes, options: AuthOptions = {}) {
+  // Option.None, not bare `None`: today `None` is JS null (#394). Callers
+  // match Some/None on Option. After #394 do not "simplify" this to `None`
+  // without checking the Option encoding — that reintroduces the bug in
+  // the gap.
   return match (read_session(request, secret, options)) {
     Err(e) => Option.None,
     Ok(session) => Option.Some(session),
@@ -251,9 +206,16 @@ export fn auth(request: AuthRequest, secret: bytes, options: AuthOptions = {}) {
   }
 }
 
+fn cookie_err(e: string) {
+  if (e == "secret must be at least 32 bytes") {
+    return Err(e)
+  }
+  return Err("unauthenticated")
+}
+
 export fn requireUser(request: AuthRequest, secret: bytes, options: AuthOptions = {}) {
   return match (read_session(request, secret, options)) {
-    Err(e) => Err("unauthenticated"),
+    Err(e) => cookie_err(e),
     Ok(session) => Ok(session),
     _ => Err("unauthenticated")
   }
