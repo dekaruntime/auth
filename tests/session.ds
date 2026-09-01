@@ -16,7 +16,7 @@ fn fail(msg: string) {
 }
 
 fn sub_of(session: Bag) string {
-  let r = unsafe { String(session.sub || "") };
+  let r = unsafe<string> { String(session.sub || "") };
   return match (r) {
     Ok(v) => v,
     Err(e) => ""
@@ -40,7 +40,7 @@ fn go() {
     return;
   }
 
-  const has_http_only: boolean = match (unsafe { alice.header.indexOf("HttpOnly") >= 0 }) {
+  const has_http_only: boolean = match (unsafe<boolean> { alice.header.indexOf("HttpOnly") >= 0 }) {
     Ok(v) => v,
     Err(e) => false
   };
@@ -183,7 +183,7 @@ fn go() {
   }
 
   const out = signOut({});
-  const clears: boolean = match (unsafe { out.header.indexOf("Max-Age=0") >= 0 }) {
+  const clears: boolean = match (unsafe<boolean> { out.header.indexOf("Max-Age=0") >= 0 }) {
     Ok(v) => v,
     Err(e) => false
   };

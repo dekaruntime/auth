@@ -49,7 +49,7 @@ fn session_key(secret: bytes) {
 }
 
 fn opt_cookie(options: AuthOptions): string {
-  let r = unsafe { String(options && options.cookie ? options.cookie : "deka_sid") };
+  let r = unsafe<string> { String(options && options.cookie ? options.cookie : "deka_sid") };
   return match (r) {
     Ok(v) => v,
     Err(e) => "deka_sid"
