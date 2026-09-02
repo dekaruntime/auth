@@ -23,12 +23,12 @@ interface SessionUser {
   roles: Array<string>?
 }
 
-fn b64url_encode(data: bytes): string {
+fn b64url_encode(data: bytes) string {
   const raw = to_base64(data)
   return raw.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
 }
 
-fn b64url_decode(value: string): bytes {
+fn b64url_decode(value: string) bytes {
   return from_base64(value.replaceAll("-", "+").replaceAll("_", "/"))
 }
 
@@ -48,7 +48,7 @@ fn session_key(secret: bytes) {
   return hmac("sha256", from_string("deka.auth.session.v1"), secret)
 }
 
-fn opt_cookie(options: AuthOptions): string {
+fn opt_cookie(options: AuthOptions) string {
   let r = unsafe<string> { String(options && options.cookie ? options.cookie : "deka_sid") };
   return match (r) {
     Ok(v) => v,
@@ -56,7 +56,7 @@ fn opt_cookie(options: AuthOptions): string {
   };
 }
 
-fn cookie_header(request: AuthRequest): string {
+fn cookie_header(request: AuthRequest) string {
   let r = unsafe {
     var headers = request && request.headers;
     if (!headers) return "";
@@ -85,7 +85,7 @@ fn set_cookie(name: string, cookie_value: string, options: AuthOptions) {
   }
 }
 
-fn session_json(user: SessionUser, options: AuthOptions): string {
+fn session_json(user: SessionUser, options: AuthOptions) string {
   let r = unsafe {
     var now = Math.floor(Date.now() / 1000);
     var maxAge = options && options.maxAge != null ? Number(options.maxAge) : 604800;
@@ -113,7 +113,7 @@ fn parse_session(pt: bytes) {
   };
 }
 
-fn has_role(session: SessionUser, role: string): boolean {
+fn has_role(session: SessionUser, role: string) boolean {
   let r = unsafe {
     var roles = session && session.roles;
     if (!Array.isArray(roles)) return false;
