@@ -55,6 +55,11 @@ fn go() {
     return;
   }
 
+  if (!alice.header.includes("Secure")) {
+    fail("fail-secure-default");
+    return;
+  }
+
   const cookie = alice.cookie + "=" + alice.value;
   const authed = match (auth(req(cookie), secret)) {
     None => "none",
@@ -171,6 +176,15 @@ fn go() {
   };
   if (custom_ok != "carol" || custom_default != "none") {
     fail("fail-custom-cookie");
+    return;
+  }
+
+  const insecure = match (signIn({ sub: "dave" }, secret, { secure: Some(false) })) {
+    Ok(out) => out,
+    Err(e) => { cookie: "", value: "", header: "" }
+  };
+  if (insecure.header == "" || insecure.header.includes("Secure")) {
+    fail("fail-secure-opt-out");
     return;
   }
 

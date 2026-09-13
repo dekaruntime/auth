@@ -95,8 +95,9 @@ fn cookie_header(request: AuthRequest) string {
 
 fn cookie_attrs(options: AuthOptions, empty: boolean) {
   const maxAge = empty ? 0 : match (options.maxAge) { Some(v) => v, None => 604800 }
-  const secure = match (options.secure) { Some(v) => v, None => false }
-  return { path: Some("/"), max_age: Some(maxAge), http_only: Some(true), same_site: Some("Lax"), secure: Some(secure) }
+  // Forward None when the caller left `secure` unset so @deka/cookies'
+  // Secure-by-default (`None => true`) applies — pre-migration behavior.
+  return { path: Some("/"), max_age: Some(maxAge), http_only: Some(true), same_site: Some("Lax"), secure: options.secure }
 }
 
 fn set_cookie(name: string, cookie_value: string, options: AuthOptions) {
